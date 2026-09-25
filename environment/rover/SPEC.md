@@ -26,9 +26,10 @@ followed by exactly k frame lines, or
 
     BUSY <ms>
 
-which means the base station was busy writing and the same request is to be sent again once
-`ms` milliseconds have gone by; sent again sooner, it gets BUSY again. `next` is the cursor for
-the rest of the run, or the word `done` on the final batch. A cursor is an opaque string and the
+which means the base station was busy writing and that batch is not ready yet, so ask for it
+again; `ms` is how much longer the base station expects to be busy. `next` is the cursor for the
+rest of the run, or the word `done` on the final batch, which is not a cursor: once it has come,
+the tool asks the archive for nothing more. A cursor is an opaque string and the
 only thing to do with one is to send it back. `max` is a whole number from 1 to 1000. A batch
 carries at most `max` frames and at most the archive's own batch size, which is set per
 deployment. Anything the archive does not accept is answered with a line starting `ERR`. A
@@ -59,8 +60,7 @@ since the Unix epoch.
 
 The computer stamps every frame it makes or passes on with its own clock, except FIX frames, and
 hands them to the radio in the order it made them. The radio numbers frames in that order with a
-16-bit counter that goes from 65535 back to 0, and a run is long enough for that to happen more
-than once.
+16-bit counter that goes from 65535 back to 0, and a run is long enough for that to happen.
 
 While the link is up the radio sends each frame as it is handed over. A frame lost in the air at
 that point is never sent again. The radio holds on to its 2,048 most recent frames, and when the

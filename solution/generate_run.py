@@ -68,7 +68,7 @@ SETS = {
         "cfg": {"lines": 256, "gear": 2, "circ_l": 1_308_220, "circ_r": 1_309_915, "mirror": "left"},
         "step_ms": 21_655, "step_before_outage": 0, "brownout_at": 0.58, "brownout_s": 1.7,
         "outages": [(0.33, 12.0)], "float": [(0.72, 5.0)], "nofix": [], "loss_p": 0.004, "blur_p": 0.2,
-        "L0": 60_417, "up0": 2_210_338, "phase": 3,
+        "L0": 60_417, "up0": 2_210_338, "phase": 3, "standalone": True,
     },
 }
 
@@ -280,6 +280,11 @@ def build(name, seed=None):
     # receiver: epochs every 200 ms of GPS time
     gps_start = start + LEAP_MS
     first_epoch = (gps_start // FIX_MS + 1) * FIX_MS
+    # plant: a standalone fix (q 1) at the epoch before a sharp tag whose next epoch is fixed
+    solo = set()
+    if cfg.get("standalone"):
+        tg = sharp_times[len(sharp_times) // 2]
+        solo.add((start + tg + LEAP_MS) // FIX_MS * FIX_MS - gps_start)
     fixes = []
     ep = first_epoch
     while ep - gps_start <= end_ms - 100:
@@ -290,6 +295,8 @@ def build(name, seed=None):
             q, sd = 5, 140.0
         if any(a <= tr_ep < b for a, b in nofix):
             q = 0
+        if tr_ep in solo:
+            q, sd = 1, 1_500.0
         if q == 0:
             e = n = 0
         else:

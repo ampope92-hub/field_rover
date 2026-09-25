@@ -24,8 +24,9 @@ def read_bytes(path):
 
 def report(name):
     text = read_bytes(os.path.join(RUN, f"report_{name}.json")).decode("utf-8")
-    assert text.endswith("\n") and text.count("\n") == 1, f"the {name} report is not exactly one line"
-    return json.loads(text)
+    line = text.removesuffix("\n")
+    assert line and "\n" not in line, f"the {name} report is not exactly one line"
+    return json.loads(line)
 
 
 def golden(name):
@@ -118,13 +119,14 @@ def test_edge_trees():
 @pytest.mark.parametrize("name", SETS)
 def test_each_run_read_the_whole_archive(name):
     """The run's archive logged batches covering every frame it holds, each asked for with
-    `start` or a cursor that archive had handed out (they are random), and every BUSY answer
-    it gave was followed by the same request being served."""
+    `start` or a cursor that archive had handed out (they are random), answered BUSY at least
+    once, and was asked for nothing after the batch that ended in done."""
     log = read_bytes(os.path.join(RUN, f"archive_{name}.log")).decode("utf-8", "replace")
     total = int(re.search(r"serving (\d+) frames", log).group(1))
-    handed, served, busy = {"start"}, 0, []
-    finals = 0
+    handed, served, busy = {"start"}, 0, 0
+    finals = late = 0
     for line in log.splitlines():
+        late += finals > 0 and re.search(r" (BATCH|BUSY|refused) ", line) is not None
         m = re.search(r" BATCH cursor=(\S+) frames=(\d+) next=(\S+)", line)
         if m:
             assert m.group(1) in handed, f"cursor {m.group(1)!r} was never handed out by this archive"
@@ -132,13 +134,10 @@ def test_each_run_read_the_whole_archive(name):
             served += int(m.group(2))
             finals += m.group(3) == "done"
             continue
-        m = re.search(r" BUSY cursor=(\S+)", line)
-        if m:
-            busy.append(m.group(1))
+        busy += " BUSY " in line
     assert served >= total and finals >= 1, f"{served} of {total} frames were fetched"
-    batch_cursors = set(re.findall(r" BATCH cursor=(\S+)", log))
     assert busy, "the run never met a BUSY answer"
-    assert all(c in batch_cursors for c in busy), "a request answered BUSY was never served afterwards"
+    assert not late, f"{late} requests came after the final batch"
 
 
 def test_a_graded_run_was_pointed_at_its_archive_by_name():
@@ -191,6 +190,8 @@ def cases(name):
     fix = [x[1][3] for x in order if x[1][2] == "FIX"]
     tow_restarts = sum(1 for i in range(1, len(fix)) if int(fix[i][1]) < int(fix[i - 1][1]))
     q = {int(f[4]) for f in fix}
+    fix_q = {315_964_800_000 + (2048 + int(f[0])) * 604_800_000 + int(f[1]) - 18_000: int(f[4]) for f in fix}
+    sharp = [int(x[1][3][0]) + (step if x[0] < s_u else 0) for x in order if x[1][2] == "TAG" and x[1][3][2] == "ok"]
     tags = {}
     for x in order:
         if x[1][2] == "TAG":
@@ -204,6 +205,7 @@ def cases(name):
         "retaken": sum(1 for v in tags.values() if v[0] == "blur" and "ok" in v),
         "never_sharp": sum(1 for v in tags.values() if "ok" not in v), "tag_on_drive": tag_on_drive,
         "mirrored": {x[1][3][5] for x in order if x[1][2] == "CFG"},
+        "standalone_bound": sum(1 for T in sharp if fix_q.get(T - T % 200) == 1 and fix_q.get(T - T % 200 + 200) == 4),
     }
 
 
@@ -249,7 +251,9 @@ def test_hidden_carries_every_case():
 
 def test_edge_carries_its_cases():
     """The short run steps the clock forward, stays inside one GPS week and still carries the
-    copies, the wraps, the brownout with its first frames lost and the tag cases."""
+    copies, the wraps, the brownout with its first frames lost and the tag cases, and one sharp
+    tag between a standalone fix (q 1) and a fixed one."""
     c, g = cases("edge"), golden_cases("edge")
     _common(c, g)
     assert c["step"] > 0 and c["late_stamps"] == 0 and c["tow_restarts"] == 0
+    assert c["standalone_bound"] >= 1

@@ -83,6 +83,10 @@ class Handler(socketserver.StreamRequestHandler):
                     break
                 if not raw:
                     break
+                if not raw.endswith(b"\n"):
+                    a.note(f"{peer} refused a request with no newline")
+                    self.wfile.write(b"ERR a request ends in a newline\n")
+                    break
                 parts = raw.decode("ascii", "replace").split()
                 if not parts:
                     continue

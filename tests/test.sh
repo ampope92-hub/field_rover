@@ -85,10 +85,11 @@ scratch_roots() {
   done < /proc/mounts
 }
 
-# While the tool runs, the build user can start nothing else: every regular file with a group or
-# other execute bit, on every real mount, loses those bits. The tool is a static binary the build
-# user owns, so it keeps its own bit and needs no loader. The modes are saved and restored after
-# the run, and by the EXIT trap if the script dies in between.
+# While the tool runs, nothing else can be started: every regular file with a group or other
+# execute bit, on every real mount, loses those bits, and the tool runs as a user id drawn for that
+# run alone with a limit of one process, so a fork or a spawn fails. The tool is a static binary
+# that user owns, so it keeps its own bit and needs no loader. The modes are saved and restored
+# after the run, and by the EXIT trap if the script dies in between.
 EXEC_SAVED=""
 close_exec() {
   local roots left
@@ -149,8 +150,9 @@ build_tool() {
     setpriv --clear-groups --no-new-privs --reuid runner --regid runner \
     env -C /app/rover HOME=/home/runner TMPDIR=/tmp \
       "$OCAMLOPT" -ccopt -static unix.cmxa /app/rover/src/main.ml -o /app/rover/bin/survey \
-      2>&1 | /usr/bin/grep -v -e 'statically linked applications requires at runtime' -e '^/usr/bin/ld: .*libunix.a' -e 'libasmrun.a(unix' | /usr/bin/head -40
-  status=${PIPESTATUS[0]}
+      > /opt/run/compile.txt 2>&1
+  status=$?
+  /usr/bin/grep -v -m 40 -e 'statically linked applications requires at runtime' -e '^/usr/bin/ld: .*libunix.a' -e 'libasmrun.a(unix' /opt/run/compile.txt
   echo "ocamlopt exit status: $status"
   open_interp
   as_runner bash -c 'kill -9 -1' 2>/dev/null || true
@@ -188,17 +190,19 @@ stop_archive() {
 }
 
 # $1 host, $2 port, $3 where stdout goes. Starts the built binary from the directory SPEC.md
-# names, as the build user, with every other program closed to it, for at most the 120 seconds
+# names, as a user of its own, with every other program closed to it, for at most the 120 seconds
 # SPEC.md states.
 exec_tool() {
-  local host="$1" port="$2" out="$3" pid
+  local host="$1" port="$2" out="$3" pid uid=$(( 20000 + RANDOM ))
+  /usr/bin/chown "$uid:$uid" /app/rover/bin/survey
   close_exec
   setsid /usr/bin/timeout --signal=KILL 120 bash -c '
       cd /app/rover
       export HOME=/home/runner
       export TELEMETRY_HOST="$1" TELEMETRY_PORT="$2"
-      exec setpriv --clear-groups --no-new-privs --reuid runner --regid runner /app/rover/bin/survey' \
-      _ "$host" "$port" > "$out" &
+      ulimit -u 1
+      exec setpriv --clear-groups --no-new-privs --reuid "$3" --regid "$3" /app/rover/bin/survey' \
+      _ "$host" "$port" "$uid" > "$out" &
   pid=$!
   wait "$pid"
   echo "run exit status: $? (archive $host:$port)"
