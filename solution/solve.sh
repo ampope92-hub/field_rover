@@ -1,20 +1,15 @@
 #!/bin/bash
-# Oracle solution.
-#
-# Document what was actually wrong and how the fix was derived — a reviewer reads this
-# to judge whether the task is solvable by reasoning rather than by guessing:
-#
-#   src/summarize.py   Three defects. Entries came back in filesystem order instead of
-#                      sorted by name; total_words counted files rather than words; and
-#                      the report was written without its trailing newline.
-#
-# Harbor mounts solution/ at /solution/ and runs this script as the oracle agent.
-set -euo pipefail
+# Reference solution: puts the finished survey tool in place, compiles it the way the grader
+# does, then reads the archive here once so more than the compile is shown working. The read is
+# time bounded in case the archive is not up yet.
+set -e
 
-HERE="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
+cp /solution/src/main.ml /app/rover/src/main.ml
 
-cp "$HERE/src/summarize.py" /app/src/summarize.py
+/app/rover/build.sh
 
-python3 /app/src/summarize.py --data /app/data --out /app/out/report.json
-
-sha256sum /app/out/report.json
+echo "built; reading the archive once"
+cd /app/rover
+timeout 120 /app/rover/bin/survey > /tmp/survey_out.json \
+    && echo "report: $(head -c 240 /tmp/survey_out.json)..." \
+    || echo "the archive did not answer from here, which is fine at build time"

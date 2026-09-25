@@ -1,77 +1,56 @@
-# TB3.0 task manifest.
-#
-# Every field below is required unless marked optional. The four prose fields
-# (difficulty/solution/verification/relevant_experience) are what a reviewer reads
-# first — write them last, once the task actually works, and write them honestly.
+name = "field-rover"
 
-name = "REPLACE-task-slug"
-
-# Paths the SEPARATE verifier reads out of the agent's final container. Declare the
-# whole project directory when the verifier needs to rebuild or re-run the agent's
-# own sources, not just inspect an output file.
-artifacts = ["/app/"]
+# The one path the separate verifier collects from the agent's final container. Top level on
+# purpose: an artifacts list under [verifier] is dropped.
+artifacts = [
+    "/app/rover/src/",
+]
 
 [metadata]
-author_name = "REPLACE"
-author_email = "REPLACE"
+author_name = "anonymous"
+author_email = "anonymous"
+category = "Science"
+subcategory = "Robotics"
+tags = ["ocaml", "odometry", "rtk-gnss", "telemetry", "clock-alignment"]
+languages = ["ocaml"]
+difficulty = "core"
+expert_time_estimate_hours = 5
+is_multi_container = true
+difficulty_explanation = """
+The agent writes an OCaml tool that reconstructs a field robot's survey run from the telemetry its base station archived, and reports how far the rover drove, how many radio frames never arrived, and for every tree the rover tagged, when, at what odometer reading and where. Each part of the rover reports on its own terms, and the spec gives each as a fact about the machine: the mission computer's clock was stepped once mid run; the drive controller counts quadrature edges on 16-bit counters, has one motor mounted mirrored and browned out once; the RTK receiver keeps GPS time with a 10-bit week and drops to float under the canopy; the camera re-tags a blurred tree from the next alley; and the radio numbers its frames on a 16-bit counter and, after a dropout, re-sends what it holds newest first. The three runs are simulated. solution/generate_run.py drives the rover, the receiver, the camera and the radio, and writes the expected report with a rule book that was written before the OCaml and knows nothing of the simulation.
 
-# category must be one of: Science, Software, ML, Operations, Security, Hardware, Media
-# subcategory is an open list — see the taxonomy for the conventional values.
-category = "REPLACE"
-subcategory = "REPLACE"
-tags = ["REPLACE", "3-to-6", "descriptive", "keywords"]
-languages = ["REPLACE"]
+The reconstruction is the work, and each misreading has been measured against the rule book. On the shipped run the step is backwards, so deciding which stamps it covers by comparing them with the step's own stamp gets 30 of the 830 graded fields wrong, and walking the drive frames in stamp order gets 161; measuring the boot after the brownout from its first frame the archive holds instead of from zero, 50; OCaml's truncating division on the interpolated positions, 164; GPS time taken as UTC, 406; the week number read as a full week, 396, or held at the first fix's week across the week change, 194; each wheel's travel added on its own so that pivot turns count, 194; one count per encoder line, 208; the mirrored motor ignored, 208; one circumference for both wheels, 193; float fixes interpolated, 14, and a missing epoch bridged, 4; a tree placed at its blurred first tag, 42, and a never-sharp tree kept, 3; the odometer read at the frame strictly before the tag, 1; and copies counted as received moves the lost count. Each of the thirty misreadings calibrate.py expresses moves at least one graded field on every one of eight fresh seeds of each run that carries its case; the held-back run has another calibration, the other motor mirrored, a longer backward step, another date and other tree numbers.
 
-# One of: base, core, advanced, frontier — set from measured pass rates, not by feel.
-difficulty = "REPLACE"
-expert_time_estimate_hours = 0  # REPLACE with a real best-case estimate for a domain expert
-
-difficulty_explanation = """\
-REPLACE. What specifically defeats a strong agent here? Name the concrete traps and \
-why partial progress still fails. A reviewer who does not know your domain should \
-finish this paragraph understanding the shape of the difficulty.\
+None of the facts is hard alone. What slows an expert is that they feed each other: the step decides where each drive frame sits on the true clock, and so the odometer at each tag; the newest-first refill decides the order the frames are walked in and where a boot seems to restart; the frames lost after the brownout decide where that boot's travel starts; and the leap seconds, the week count and the step together decide which two fixes bracket a tag. A report can sit close to the receiver's track all the way round, pass every check the agent can make on the box, and still be wrong on the run it cannot see. This is the job of the engineer who owns a field robot's logs and has to say why the odometer, the receiver and the task log disagree before anyone trusts a survey.
 """
-
-solution_explanation = """\
-REPLACE. The reference approach at a level someone could follow without reading \
-solve.sh — what has to be discovered, in what order, and what the key insight is.\
+solution_explanation = """
+solve.sh drops solution/src/main.ml in place of the stub and runs build.sh, which uses the same ocamlopt line the grader does. It opens the archive named by TELEMETRY_HOST (an address or a name) and TELEMETRY_PORT, asks for batches of up to 1000 frames from the cursor start, follows each next cursor to done, and waits out a BUSY for the time it names before asking again. Frames are kept once by their text, their 16-bit numbers are unwrapped along arrival order to the value nearest the one before, and they are sorted back into the order the rover made them. Stamps from before the SYS frame in that order get its step added. The CFG frame gives four counts per line times gear counts per wheel turn, the two circumferences and the mirrored side. Drive frames are walked in order with every counter difference read the short way round, the mirrored side negated, a boot restarting at a fall in up with the counters from zero, and the absolute value of left travel plus right travel summed exactly, so the total and each odometer reading is one floor division at the end. Fixes go on the UTC clock from week plus 2048, time of week and 18 leap seconds. For each tree with a sharp tag, the odometer is read at the last drive frame at or before the tag, and the position is interpolated between the epoch at or before the tag and the next one when both fixes are held and fixed, with a floor division that rounds toward minus infinity. The report is printed as one line. It equals the rule book's report on all three runs; the rule book is Python, in solution/generate_run.py, and calibrate.py runs it with one reading at a time switched to a plausible wrong one.
 """
+verification_explanation = """
+tests/test.sh and tests/test_outputs.py grade in their own container, from the one collected path, /app/rover/src, over seventeen checks and three graded runs. Before each run the verifier compiles the tool itself from a root-owned copy: everything under src but main.ml is deleted first, and the compile is the one the spec states, as an unprivileged user, so a C stub, an object or a second module never reaches the compiler.
 
-verification_explanation = """\
-REPLACE. What the verifier grades, how it grades it, and why passing it is only \
-possible by actually doing the work. Call out each independent axis of failure.\
+The expected reports were written once, by the rule book, when the runs were generated; they sit in the verifier image where only root can open them, and no code at grading time works a report out. Each run talks to an archive the verifier starts from its own copy, with a batch size and a BUSY schedule the agent's environment never used: the shipped run on 127.0.0.2, a held-back run of 92,183 frames with another calibration, mirrored side, step, date and tree numbers on 127.0.0.1, and a short run with a forward step reached by a host name the verifier puts in its hosts file. distance_mm, lost_frames and every tree row are compared for exact equality, after a shape check on the one line of JSON.
+
+The agent's program runs in the container that holds the goldens, so the compile and the runs go through setpriv as an unprivileged user with groups cleared; the tests, the runs, the service and the log directory are closed to that user and probed first, and a run that can still reach one scores 0. While the tool runs every other program on the box loses its group and other execute bits, and the tool is a static binary, so nothing else can be started. Every entry on root's PATH must be root-owned and closed to others, pytest starts by absolute path with -P, every file the tests read is opened with O_NOFOLLOW, and only root writes the reward.
+
+Coverage is counted from the runs, not assumed. One check per run reads the frames and requires the step's sign (backward on the shipped and held-back runs, with stamps made before it that read later than it), copies and a newest-first refill, the frame number and both counters wrapping, one brownout whose first frames never arrived, the GPS week turning over where the run crosses it, float and lost fixes, retaken, never-sharp and drive-aligned tags, and negative grid positions. Another requires each archive's log to show every frame fetched through cursors it handed out and every BUSY request served afterwards, and one that the short run reached its archive by name. Twelve variants of the reference with one reading changed each, and a frozen copy of the shipped report, all scored 0 through this verifier; the reference scored 1.
 """
-
-# NOTE: this one is a claim about you, not about the task. Rewrite it to match your
-# actual background before submitting; generic statements fail review.
-relevant_experience = """\
-REPLACE. The professional experience that qualifies you to set the difficulty and \
-correctness bar for this task.\
+relevant_experience = """
+I have looked after the logs of an outdoor field robot, a differential-drive platform with RTK and a radio link back to a base station, and most of what went into this task is from that work: the computer whose battery clock was wrong until the time service stepped it, the encoder counted on every quadrature edge, the motor controller mounted mirror image on one side, the brownout that zeroes the counters, the receiver that keeps GPS time and drops to float under trees, and the telemetry radio that fills in a gap newest first. Before a survey from such a robot is trusted, somebody has to put all of those on one clock and one odometer. For every fact in the spec I made sure the runs contain a stretch where getting that one fact wrong, and nothing else, puts a number in the report off.
 """
-
-# Network policy is set per phase. [environment] is the baseline and MUST be
-# "public" so the image build can install dependencies — the harnesses require it.
-# [agent] and [verifier] are the author's choice: either "public" or "no-network".
-# Those two values are the only permitted ones. Set all three phases explicitly
-# rather than relying on inheritance from the baseline.
 
 [verifier]
-timeout_sec = 600
-network_mode = "no-network"
-# "separate" is required: the verifier runs in its own container built from
-# tests/Dockerfile, after the agent's container is torn down. Tests and oracle data
-# are therefore never visible to the agent.
+timeout_sec = 1800
 environment_mode = "separate"
+network_mode = "public"
 
 [agent]
-timeout_sec = 3600
-# "no-network" if the task is meant to be solved offline; "public" if it genuinely
-# needs internet access. REPLACE to match your task.
-network_mode = "no-network"
+timeout_sec = 5400
+network_mode = "public"
 
 [environment]
 network_mode = "public"
-build_timeout_sec = 600
+build_timeout_sec = 900
 cpus = 2
-memory_mb = 8192
+memory_mb = 4096
 storage_mb = 10240

@@ -1,11 +1,5 @@
-The summariser in /app is wrong. It runs, but the report it writes does not match what
-downstream expects.
+Last night's SR-4 run through the east block has to be written up before the orchard team plans its next pass. The base station's telemetry archive for that run is up on this box, with `TELEMETRY_HOST` and `TELEMETRY_PORT` set in the environment, and it holds every frame the base station heard from the rover over the radio. `/app/rover/SPEC.md` has the archive protocol, the frame layouts, what we know about the rover's drive controller, receiver, camera, computer clock and radio on this run, and the report the team wants. `/app/rover/src/main.ml` is just a stub right now. It needs to become a tool that pulls the whole run off the archive and prints the survey report as one line of JSON on standard output: how far the rover drove, how many frames never made it to the base station, and for each tree with a sharp tag, when it was tagged, the odometer at that moment and where the rover was.
 
-Rebuild /app/out/report.json for the files under /app/data. The report is a JSON object with
-a "files" array — one entry per .txt file, each with its "name" and its "words" count — ordered
-by name, plus a "total_words" holding the sum of every word counted. It is indented by two
-spaces and ends with a trailing newline.
+The rover's parts don't agree with each other. The computer's clock got stepped part way through, the drive controller browned out, one drive motor is mounted backwards, the radio dropped out and then re-sent what it was holding newest first, and the receiver keeps GPS time and slips to float under the trees. The spec puts every one of those down as a fact about the machine and says nothing about what to do with it.
 
-Keep it driveable the way CI drives it: the program stays at /app/src/summarize.py and is run as
-`python3 /app/src/summarize.py --data <dir> --out <file>`. CI points it at directories other
-than the one shipped here.
+Our rover tooling is OCaml, so this is too, and it has to build with the exact compile line in the spec from main.ml alone. The grader runs it from `/app/rover` three times: against this run served on a different address and port with a different batch size, against a longer run you haven't seen (another rover calibration, clock step, date and tree numbering), and against a short run whose archive is given by host name. The archive answers BUSY now and then on all three. On each run the distance, the lost frame count and every tree row have to equal the reference exactly, and the tool has to have fetched every batch with the cursors that archive handed out.

@@ -1,100 +1,255 @@
-"""Verifier for the skeleton task.
-
-Two things are graded independently. The report has to match the approved bytes for the
-shipped inputs, and the agent's own program has to reproduce those bytes when re-run
-against inputs it has never seen. The second is what stops a hand-written report from
-passing: the artifact alone is cheap to fake, re-deriving it on held-out data is not.
-
-Replace the whole file for a real task, but keep the shape: golden bytes, a held-out
-re-run, and a determinism check.
-"""
-
-import hashlib
+"""Grades the survey reports. test.sh rebuilt the agent's OCaml three times and ran it against the
+shipped run, a held-back run and a short run reached by host name, keeping stdout under /opt/run.
+Nothing here recomputes a report: every value is compared with the golden that the rule book in
+solution/generate_run.py wrote. The coverage checks at the end read the runs themselves to show
+that each fact SPEC.md states is actually exercised by the data it is graded on."""
 import json
-import shutil
-import subprocess
-from pathlib import Path
+import os
+import re
 
 import pytest
 
-APP = Path("/app")
-SRC = APP / "src" / "summarize.py"
-REPORT = APP / "out" / "report.json"
-DATA = APP / "data"
-HOLDOUT = Path("/tests/holdout")
-
-# Scratch space owned by the sandbox user; see tests/Dockerfile.
-WORK_OUT = Path("/work/out")
-
-SANDBOX_UID = 12000
-DROP_PRIVILEGES = [
-    "setpriv",
-    f"--reuid={SANDBOX_UID}",
-    f"--regid={SANDBOX_UID}",
-    "--clear-groups",
-]
-
-# SHA-256 of the report each input set must produce. Generated from solution/src.
-EXPECTED_PRIMARY = "60fec4718722649de61a0a56094fa49cf19597bd942244b27c77cea81352ce57"
-EXPECTED_HOLDOUT = {"h1": "a3cca7560ba22f8ec8e43ead53cee7566e713086e19c21ef42bd785bc7da77ba"}
+RUN = "/opt/run"
+TRUTH = "/opt/truth"
+SETS = ["sample", "hidden", "edge"]
+TREE_KEYS = {"id", "utc_ms", "odometer_mm", "east_mm", "north_mm"}
 
 
-def sha256(path):
-    return hashlib.sha256(Path(path).read_bytes()).hexdigest()
+def read_bytes(path):
+    """Opens without following a symlink, so a link planted at the path is refused."""
+    fd = os.open(path, os.O_RDONLY | os.O_NOFOLLOW)
+    with os.fdopen(fd, "rb") as fh:
+        return fh.read()
 
 
-def run_agent_program(data_dir, out_path):
-    """Runs the agent's own program, unprivileged, against a directory of our choosing."""
-    return subprocess.run(
-        DROP_PRIVILEGES
-        + ["python3", str(SRC), "--data", str(data_dir), "--out", str(out_path)],
-        capture_output=True,
-        text=True,
-        timeout=120,
-    )
+def report(name):
+    text = read_bytes(os.path.join(RUN, f"report_{name}.json")).decode("utf-8")
+    assert text.endswith("\n") and text.count("\n") == 1, f"the {name} report is not exactly one line"
+    return json.loads(text)
 
 
-def test_report_exists():
-    """The declared artifact was produced at the documented path."""
-    assert REPORT.is_file(), f"{REPORT} was not created"
+def golden(name):
+    return json.loads(read_bytes(os.path.join(TRUTH, "golden", name + ".json")))
 
 
-def test_report_is_valid_json():
-    """The report parses and carries the documented top-level keys."""
-    data = json.loads(REPORT.read_text())
-    assert set(data) == {"files", "total_words"}, f"unexpected top-level keys: {sorted(data)}"
+def is_int(v):
+    return isinstance(v, int) and not isinstance(v, bool)
 
 
-def test_report_matches_approved_bytes():
-    """The report is byte-identical to the approved output for the shipped inputs."""
-    actual = sha256(REPORT)
-    assert actual == EXPECTED_PRIMARY, (
-        f"report.json does not match the approved bytes\n"
-        f"  expected sha256 {EXPECTED_PRIMARY}\n  actual   sha256 {actual}"
-    )
+# ── the reports ───────────────────────────────────────────────────────────────────────────
+
+def test_every_build_succeeded():
+    """All three compiles of the collected src/main.ml produced a regular binary."""
+    status = read_bytes(os.path.join(RUN, "build_check.txt")).decode().strip()
+    assert status == "ok", "a compile of /app/rover/src/main.ml failed or produced no binary"
 
 
-@pytest.mark.parametrize("name", sorted(EXPECTED_HOLDOUT))
-def test_holdout_reproduces_approved_bytes(name):
-    """Re-running the agent's program on unseen inputs reproduces the approved bytes.
+@pytest.mark.parametrize("name", SETS)
+def test_report_shape(name):
+    """Each run printed one line holding a JSON object with exactly distance_mm, lost_frames and
+    trees; the figures are integers, trees is in ascending id order with one object per id, and
+    east_mm and north_mm are both integers or both null."""
+    rep = report(name)
+    assert isinstance(rep, dict) and set(rep) == {"distance_mm", "lost_frames", "trees"}, sorted(rep)
+    assert is_int(rep["distance_mm"]) and is_int(rep["lost_frames"])
+    assert isinstance(rep["trees"], list)
+    ids = []
+    for row in rep["trees"]:
+        assert isinstance(row, dict) and set(row) == TREE_KEYS, row
+        assert all(is_int(row[k]) for k in ("id", "utc_ms", "odometer_mm")), row
+        both_null = row["east_mm"] is None and row["north_mm"] is None
+        assert both_null or (is_int(row["east_mm"]) and is_int(row["north_mm"])), row
+        ids.append(row["id"])
+    assert ids == sorted(set(ids)), "trees is not in ascending id order with one object per tree"
 
-    This is the anti-cheat axis: it proves the report on disk was generated by the
-    program rather than written by hand or pinned to the shipped fixtures.
-    """
-    out = WORK_OUT / f"{name}.json"
-    result = run_agent_program(HOLDOUT / name, out)
-    assert result.returncode == 0, f"program failed on held-out set {name}:\n{result.stderr}"
 
-    actual = sha256(out)
-    assert actual == EXPECTED_HOLDOUT[name], (
-        f"held-out set {name} did not reproduce the approved bytes\n"
-        f"  expected sha256 {EXPECTED_HOLDOUT[name]}\n  actual   sha256 {actual}"
-    )
+def _totals(name):
+    rep, want = report(name), golden(name)
+    assert rep["distance_mm"] == want["distance_mm"], f"{name}: distance_mm {rep['distance_mm']}, the rule book gives {want['distance_mm']}"
+    assert rep["lost_frames"] == want["lost_frames"], f"{name}: lost_frames {rep['lost_frames']}, the rule book gives {want['lost_frames']}"
 
 
-def test_output_is_deterministic():
-    """Two runs over the same inputs produce identical bytes."""
-    first, second = WORK_OUT / "det-1.json", WORK_OUT / "det-2.json"
-    for out in (first, second):
-        assert run_agent_program(DATA, out).returncode == 0, "program failed on shipped inputs"
-    assert sha256(first) == sha256(second), "program output is not deterministic"
+def _trees(name):
+    got = {r["id"]: r for r in report(name)["trees"]}
+    want = {r["id"]: r for r in golden(name)["trees"]}
+    missing = sorted(set(want) - set(got))
+    extra = sorted(set(got) - set(want))
+    assert not missing and not extra, f"{name}: trees missing {missing[:8]}, not expected {extra[:8]}"
+    wrong = [k for k in sorted(want) if got[k] != want[k]]
+    assert not wrong, (f"{name}: {len(wrong)} of {len(want)} trees differ from the rule book, first: "
+                       + "; ".join(f"{got[k]} (expected {want[k]})" for k in wrong[:3]))
+
+
+def test_sample_distance_and_lost():
+    """On the shipped run, served on an address, port, batch size and BUSY schedule the agent's
+    environment never used, distance_mm and lost_frames equal the rule book's."""
+    _totals("sample")
+
+
+def test_sample_trees():
+    """On the shipped run every tree row (tag time, odometer and position) equals the rule book's."""
+    _trees("sample")
+
+
+def test_hidden_distance_and_lost():
+    """On a longer run the agent never saw, with another calibration, mirrored side, clock step,
+    dates and tree numbering, distance_mm and lost_frames equal the rule book's."""
+    _totals("hidden")
+
+
+def test_hidden_trees():
+    """On the held-back run every tree row equals the rule book's."""
+    _trees("hidden")
+
+
+def test_edge_distance_and_lost():
+    """On the short run, reached by host name, with the clock stepped forward, distance_mm and
+    lost_frames equal the rule book's."""
+    _totals("edge")
+
+
+def test_edge_trees():
+    """On the short run every tree row equals the rule book's."""
+    _trees("edge")
+
+
+# ── the protocol ──────────────────────────────────────────────────────────────────────────
+
+@pytest.mark.parametrize("name", SETS)
+def test_each_run_read_the_whole_archive(name):
+    """The run's archive logged batches covering every frame it holds, each asked for with
+    `start` or a cursor that archive had handed out (they are random), and every BUSY answer
+    it gave was followed by the same request being served."""
+    log = read_bytes(os.path.join(RUN, f"archive_{name}.log")).decode("utf-8", "replace")
+    total = int(re.search(r"serving (\d+) frames", log).group(1))
+    handed, served, busy = {"start"}, 0, []
+    finals = 0
+    for line in log.splitlines():
+        m = re.search(r" BATCH cursor=(\S+) frames=(\d+) next=(\S+)", line)
+        if m:
+            assert m.group(1) in handed, f"cursor {m.group(1)!r} was never handed out by this archive"
+            handed.add(m.group(3))
+            served += int(m.group(2))
+            finals += m.group(3) == "done"
+            continue
+        m = re.search(r" BUSY cursor=(\S+)", line)
+        if m:
+            busy.append(m.group(1))
+    assert served >= total and finals >= 1, f"{served} of {total} frames were fetched"
+    batch_cursors = set(re.findall(r" BATCH cursor=(\S+)", log))
+    assert busy, "the run never met a BUSY answer"
+    assert all(c in batch_cursors for c in busy), "a request answered BUSY was never served afterwards"
+
+
+def test_a_graded_run_was_pointed_at_its_archive_by_name():
+    """TELEMETRY_HOST carries a host name as readily as an address; the short run was given a
+    name, its archive listened on the address the name resolves to, and it served that run."""
+    host = read_bytes(os.path.join(RUN, "named_host.txt")).decode().strip()
+    assert host and not re.match(r"^\d+\.\d+\.\d+\.\d+$", host), f"the named run was given {host!r}"
+    log = read_bytes(os.path.join(RUN, "archive_edge.log")).decode("utf-8", "replace")
+    assert "127.0.0.4:" in log.splitlines()[0]
+    assert " BATCH " in log, "the named run never reached its archive"
+
+
+# ── coverage: counted from the runs rather than assumed ───────────────────────────────────
+
+def frames(name):
+    """[(rx, L16, type, fields, text)] in arrival order."""
+    out = []
+    for ln in read_bytes(os.path.join(TRUTH, name, "run.txt")).decode().splitlines():
+        rx, text = ln.split(" ", 1)
+        f = text.split(",")
+        out.append((int(rx), int(f[0]), f[1], f[2:], text))
+    return out
+
+
+def cases(name):
+    items = frames(name)
+    texts = [it[4] for it in items]
+    copies = len(texts) - len(set(texts))
+    firsts, seen = [], set()
+    for it in items:
+        if it[4] not in seen:
+            seen.add(it[4])
+            firsts.append(it)
+    # the frame number put back in order, each to the value nearest the one before
+    last, order = None, []
+    for it in firsts:
+        u = it[1] if last is None else last + (it[1] - last + 32768) % 65536 - 32768
+        last = u
+        order.append((u, it))
+    wraps_link = sum(1 for i in range(1, len(order)) if order[i][1][1] < order[i - 1][1][1] - 30000)
+    newest_first = sum(1 for i in range(1, len(order)) if order[i][0] == order[i - 1][0] - 1)
+    order.sort(key=lambda x: x[0])
+    sys_ = [x for x in order if x[1][2] == "SYS"]
+    s_u, s_t, step = sys_[0][0], int(sys_[0][1][3][0]), int(sys_[0][1][3][1])
+    stamped_before = [x for x in order if x[1][2] in ("DRV", "TAG") and x[0] < s_u]
+    late_stamps = sum(1 for x in stamped_before if int(x[1][3][0]) >= s_t)
+    drv = [x[1][3] for x in order if x[1][2] == "DRV"]
+    resets = [i for i in range(1, len(drv)) if int(drv[i][1]) < int(drv[i - 1][1])]
+    counter_wraps = sum(1 for i in range(1, len(drv)) for k in (2, 3) if abs(int(drv[i][k]) - int(drv[i - 1][k])) > 32768)
+    fix = [x[1][3] for x in order if x[1][2] == "FIX"]
+    tow_restarts = sum(1 for i in range(1, len(fix)) if int(fix[i][1]) < int(fix[i - 1][1]))
+    q = {int(f[4]) for f in fix}
+    tags = {}
+    for x in order:
+        if x[1][2] == "TAG":
+            tags.setdefault(int(x[1][3][1]), []).append(x[1][3][2])
+    drv_stamps = {(x[0] < s_u, int(x[1][3][0])) for x in order if x[1][2] == "DRV"}
+    tag_on_drive = sum(1 for x in order if x[1][2] == "TAG" and (x[0] < s_u, int(x[1][3][0])) in drv_stamps)
+    return {
+        "copies": copies, "wraps_link": wraps_link, "newest_first": newest_first, "step": step,
+        "late_stamps": late_stamps, "sys": len(sys_), "resets": resets, "first_after_reset": drv[resets[0]] if resets else None,
+        "counter_wraps": counter_wraps, "tow_restarts": tow_restarts, "q": q,
+        "retaken": sum(1 for v in tags.values() if v[0] == "blur" and "ok" in v),
+        "never_sharp": sum(1 for v in tags.values() if "ok" not in v), "tag_on_drive": tag_on_drive,
+        "mirrored": {x[1][3][5] for x in order if x[1][2] == "CFG"},
+    }
+
+
+def golden_cases(name):
+    g = golden(name)
+    pos = [t for t in g["trees"] if t["east_mm"] is not None]
+    return {
+        "negative_both": sum(1 for t in pos if t["east_mm"] < 0 and t["north_mm"] < 0),
+        "floor_matters": sum(1 for t in pos if t["east_mm"] < 0 or t["north_mm"] < 0),
+        "null": sum(1 for t in g["trees"] if t["east_mm"] is None),
+        "lost": g["lost_frames"],
+    }
+
+
+def _common(c, g):
+    assert c["sys"] == 1 and c["copies"] >= 20 and c["newest_first"] >= 50 and c["wraps_link"] >= 1
+    assert len(c["resets"]) == 1 and (int(c["first_after_reset"][2]) != 0 or int(c["first_after_reset"][3]) != 0)
+    assert c["counter_wraps"] >= 3 and {4, 5} <= c["q"]
+    assert c["retaken"] >= 2 and c["never_sharp"] >= 1 and c["tag_on_drive"] >= 1
+    assert g["negative_both"] >= 1 and g["null"] >= 2 and g["lost"] > 0
+
+
+def test_sample_carries_every_case():
+    """The shipped run carries each case SPEC.md's facts turn on: a backward clock step with
+    stamps made before it that read later than the step, copies sent twice and a store sent
+    newest first, the 16-bit frame number and both wheel counters wrapping, one brownout whose
+    first drive frames after the boot never arrived, the GPS week turning over, float and lost
+    fixes, retaken, never-sharp and drive-aligned tags, and negative grid positions."""
+    c, g = cases("sample"), golden_cases("sample")
+    _common(c, g)
+    assert c["step"] < 0 and c["late_stamps"] >= 100 and c["tow_restarts"] == 1 and 0 in c["q"]
+    assert c["mirrored"] == {"left"}
+
+
+def test_hidden_carries_every_case():
+    """The held-back run carries the same cases with other constants: the right motor mirrored,
+    another calibration, a larger backward step and the GPS week turning over."""
+    c, g = cases("hidden"), golden_cases("hidden")
+    _common(c, g)
+    assert c["step"] < 0 and c["late_stamps"] >= 100 and c["tow_restarts"] == 1 and 0 in c["q"]
+    assert c["mirrored"] == {"right"}
+
+
+def test_edge_carries_its_cases():
+    """The short run steps the clock forward, stays inside one GPS week and still carries the
+    copies, the wraps, the brownout with its first frames lost and the tag cases."""
+    c, g = cases("edge"), golden_cases("edge")
+    _common(c, g)
+    assert c["step"] > 0 and c["late_stamps"] == 0 and c["tow_restarts"] == 0

@@ -1,0 +1,30 @@
+services:
+  # The rover tooling container. The harness supplies its build and keepalive; this only says
+  # where the archive is.
+  main:
+    environment:
+      TELEMETRY_HOST: "127.0.0.1"
+      TELEMETRY_PORT: "7700"
+
+  # The base station's telemetry archive, in its own image. Every service shares one network
+  # namespace, so it is reached on the loopback address.
+  telemetry:
+    build:
+      context: .
+      dockerfile: Dockerfile.telemetry
+    restart: unless-stopped
+    command:
+      - "python3"
+      - "/srv/telemetry/archive.py"
+      - "--data"
+      - "/srv/telemetry/sample"
+      - "--host"
+      - "127.0.0.1"
+      - "--port"
+      - "7700"
+      - "--batch"
+      - "500"
+      # which requests this base station answers BUSY: the second one it sees, every
+      # twenty-fifth after that, and every fresh request for the last batch
+      - "--busy"
+      - "2,e25,last"
