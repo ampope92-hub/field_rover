@@ -9,8 +9,8 @@ artifacts = [
 [metadata]
 author_name = "anonymous"
 author_email = "anonymous"
-category = "Science"
-subcategory = "Robotics"
+category = "Software"
+subcategory = "Data engineering"
 tags = ["ocaml", "odometry", "rtk-gnss", "telemetry", "clock-alignment"]
 languages = ["ocaml"]
 difficulty = "core"
