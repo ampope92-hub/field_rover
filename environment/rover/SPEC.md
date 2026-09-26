@@ -14,7 +14,6 @@ of the archive and `TELEMETRY_PORT` its port.
 A request is one line ending in a newline, and so is the first line of every answer.
 
     FROM <cursor> <max>
-    QUIT
 
 The cursor `start` is the beginning of the run. The archive answers either
 
@@ -30,7 +29,7 @@ which is not a cursor. A cursor is an opaque string and the only thing to do wit
 it back. `max` is a whole number from 1 to 1000. A batch carries at most `max` frames and at
 most the archive's own batch size, which is set per deployment. Anything the archive does not
 accept is answered with a line starting `ERR`; the tool sends nothing the archive does not
-accept. `QUIT` closes the connection.
+accept.
 
 A frame line is
 

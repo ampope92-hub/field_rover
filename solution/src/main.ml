@@ -51,7 +51,6 @@ let fetch_all () =
     | _ -> failwith ("the archive answered: " ^ head)
   in
   ask "start";
-  (try output_string oc "QUIT\n"; flush oc with _ -> ());
   List.rev !acc
 
 (* ---- frames ----------------------------------------------------------------------------- *)
