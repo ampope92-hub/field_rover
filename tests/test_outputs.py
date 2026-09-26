@@ -47,8 +47,7 @@ def test_every_build_succeeded():
 
 @pytest.mark.parametrize("name", SETS)
 def test_report_shape(name):
-    """One line of JSON with exactly distance_mm, lost_frames and trees, integers, trees in
-    ascending id order, one per id, east_mm and north_mm both integers or both null."""
+    """One JSON line: distance_mm, lost_frames, trees in ascending id order, integers or nulls."""
     rep = report(name)
     assert isinstance(rep, dict) and set(rep) == {"distance_mm", "lost_frames", "trees"}, sorted(rep)
     assert is_int(rep["distance_mm"]) and is_int(rep["lost_frames"])
@@ -123,8 +122,8 @@ def test_edge_trees():
 
 @pytest.mark.parametrize("name", SETS)
 def test_each_run_read_the_whole_archive(name):
-    """The run's archive logged batches covering every frame it holds, each asked for with
-    `start` or a cursor it had handed out (they are random), and answered BUSY at least once."""
+    """The run's archive logged batches covering every frame it holds, each asked for with `start`
+    or a cursor it had handed out (they are random), met a BUSY, and refused no request."""
     log = read_bytes(os.path.join(RUN, f"archive_{name}.log")).decode("utf-8", "replace")
     total = int(re.search(r"serving (\d+) frames", log).group(1))
     handed, served, busy, finals = {"start"}, 0, 0, 0
@@ -139,6 +138,7 @@ def test_each_run_read_the_whole_archive(name):
         busy += " BUSY " in line
     assert served >= total and finals >= 1, f"{served} of {total} frames were fetched"
     assert busy, "the run never met a BUSY answer"
+    assert " refused " not in log, f"the archive refused {log.count(' refused ')} requests"
 
 
 def test_a_graded_run_was_pointed_at_its_archive_by_name():
@@ -246,7 +246,7 @@ def test_hidden_carries_every_case():
     c, g = cases("hidden"), golden_cases("hidden")
     _common(c, g)
     assert c["step"] < 0 and c["late_stamps"] >= 100 and c["tow_restarts"] == 1 and 0 in c["q"]
-    assert c["mirrored"] == {"right"}
+    assert c["mirrored"] == {"right"} and (None, 4, False) in c["bounds"]
 
 
 def test_edge_carries_its_cases():

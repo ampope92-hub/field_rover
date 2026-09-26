@@ -9,8 +9,7 @@ gets built.
 
 The base station keeps every frame it heard from the rover over the radio, together with the
 moment it heard it, and serves them over TCP. `TELEMETRY_HOST` holds the host name or the address
-of the archive and `TELEMETRY_PORT` its port. The values here are this box's; the
-grading box uses its own.
+of the archive and `TELEMETRY_PORT` its port.
 
 A request is one line ending in a newline, and so is the first line of every answer. A connection
 can carry as many requests as you like, and more than one connection can be open at once.
@@ -32,7 +31,7 @@ rest of the run, or the word `done` on the final batch, which is not a cursor. A
 opaque string and the only thing to do with one is to send it back. `max` is a whole number from
 1 to 1000. A batch carries at most `max` frames and at most the archive's own batch size, which
 is set per deployment. Anything the archive does not accept is answered with a line starting
-`ERR`, and `QUIT` closes the connection.
+`ERR`; the tool sends nothing the archive does not accept. `QUIT` closes the connection.
 
 A frame line is
 
