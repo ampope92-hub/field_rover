@@ -4,6 +4,8 @@
     generate_run.py --write ROOT           write the environment copy, the verifier sets and
                                            the goldens under the task folder ROOT
     generate_run.py --set NAME --seed S    print the report for a fresh draw (calibrate.py)
+    generate_run.py --ref BIN --write ROOT serve each written run with the archive and store the
+                                           compiled OCaml reference BIN's report in tests/golden_ref
 
 A scouting rover drives the alleys of an orchard and tags every tree it passes with its row
 camera. Its motor controller reports both wheel counters fifty times a second, its RTK receiver
@@ -23,6 +25,8 @@ import json
 import math
 import os
 import random
+import subprocess
+import time
 
 GPS_EPOCH_UNIX_MS = 315_964_800_000          # 1980-01-06 00:00:00 UTC
 WEEK_MS = 604_800_000
@@ -68,7 +72,7 @@ SETS = {
         "cfg": {"lines": 256, "gear": 2, "circ_l": 1_308_220, "circ_r": 1_309_915, "mirror": "left"},
         "step_ms": 21_655, "step_before_outage": 0, "brownout_at": 0.58, "brownout_s": 1.7,
         "outages": [(0.33, 12.0)], "float": [(0.72, 5.0)], "nofix": [], "loss_p": 0.004, "blur_p": 0.2,
-        "L0": 60_417, "up0": 2_210_338, "phase": 3, "standalone": True,
+        "L0": 60_417, "up0": 2_210_338, "phase": 3, "standalone": True, "quiet_reset": True,
     },
 }
 
@@ -185,6 +189,15 @@ def build(name, seed=None):
     base_l = base_r = 0.0
     up0 = cfg["up0"]
     boot = 1
+    off = [7_311.0, 2_094.0]
+    if cfg.get("quiet_reset"):
+        # plant: boot 1's last frame reads 3 counts short of the first held frame of boot 2 on
+        # both counters, so only the fall in up marks the boot
+        tr_b = cfg["phase"] + (brown_at - 1 - cfg["phase"]) // DRV_MS * DRV_MS
+        b0, t3 = pose[boot2 + boot2_phase], pose[boot2 + boot2_phase + 3 * DRV_MS]
+        for k, circ in ((0, c["circ_l"]), (1, c["circ_r"])):
+            post = math.floor((t3[2 + k] - b0[2 + k]) * 1000 * cpr / circ)
+            off[k] = (post - 3 + 0.5) * circ / (1000 * cpr) - pose[tr_b][2 + k]
     while tr <= end_ms:
         if brown_at <= tr < boot2:
             tr = boot2 + boot2_phase
@@ -195,8 +208,8 @@ def build(name, seed=None):
         if boot == 1:
             up = up0 + tr
             # the counters were at some arbitrary value when the run began
-            nl = math.floor((tl + 7_311.0) * 1000 * cpr / c["circ_l"])
-            nr = math.floor((trr + 2_094.0) * 1000 * cpr / c["circ_r"])
+            nl = math.floor((tl + off[0]) * 1000 * cpr / c["circ_l"])
+            nr = math.floor((trr + off[1]) * 1000 * cpr / c["circ_r"])
         else:
             up = tr - boot2
             nl = math.floor((tl - base_l) * 1000 * cpr / c["circ_l"])
@@ -280,11 +293,22 @@ def build(name, seed=None):
     # receiver: epochs every 200 ms of GPS time
     gps_start = start + LEAP_MS
     first_epoch = (gps_start // FIX_MS + 1) * FIX_MS
-    # plant: a standalone fix (q 1) at the epoch before a sharp tag whose next epoch is fixed
-    solo = set()
+    # plant: a standalone fix (q 1) at the epoch before a sharp tag whose next epoch is fixed;
+    # then, on clear sharp tags, a q 1 and a q 0 fix at the following epoch, and a tag moved onto
+    # an epoch whose preceding fix is q 1
+    solo, zero = set(), set()
     if cfg.get("standalone"):
         tg = sharp_times[len(sharp_times) // 2]
         solo.add((start + tg + LEAP_MS) // FIX_MS * FIX_MS - gps_start)
+        clear = [j for j, t in enumerate(tags) if t[2] and t[0] not in (tg, tags[i][0])
+                 and not any(a - 1000 <= t[0] <= b + 1000 for a, b in floats + outages)]
+        for j, plant in zip(clear[1::3], (solo, zero, None)):
+            nxt = (start + tags[j][0] + LEAP_MS) // FIX_MS * FIX_MS + FIX_MS - gps_start
+            if plant is not None:
+                plant.add(nxt)
+            else:
+                tags[j] = (nxt - FIX_MS,) + tags[j][1:]
+                solo.add(nxt - 2 * FIX_MS)
     fixes = []
     ep = first_epoch
     while ep - gps_start <= end_ms - 100:
@@ -302,6 +326,8 @@ def build(name, seed=None):
         else:
             e = round(x + rng.gauss(0, sd))
             n = round(y + rng.gauss(0, sd))
+        if tr_ep in zero:
+            q, e, n = 0, 0, 0
         g = ep - GPS_EPOCH_UNIX_MS
         week, tow = divmod(g, WEEK_MS)
         fixes.append((tr_ep, week % 1024, tow, e, n, q))
@@ -644,7 +670,26 @@ def main():
     ap.add_argument("--write")
     ap.add_argument("--set")
     ap.add_argument("--seed", type=int)
+    ap.add_argument("--ref")
     a = ap.parse_args()
+    if a.ref:
+        # the second, independent derivation of each report: the OCaml reference run against
+        # the archive serving the written run; the verifier checks the two agree
+        os.makedirs(os.path.join(a.write, "tests", "golden_ref"), exist_ok=True)
+        for k, name in enumerate(SETS):
+            ready = f"/tmp/ref_ready_{name}"
+            srv = subprocess.Popen(["python3", os.path.join(a.write, "environment", "telemetry", "archive.py"),
+                                    "--data", os.path.join(a.write, "tests", "data", name), "--port", str(7790 + k),
+                                    "--batch", "1000", "--ready-file", ready, "--log", "/dev/null"])
+            while not os.path.exists(ready):
+                time.sleep(0.1)
+            env = dict(os.environ, TELEMETRY_HOST="127.0.0.1", TELEMETRY_PORT=str(7790 + k))
+            out = subprocess.run([a.ref], env=env, capture_output=True, check=True, timeout=300).stdout
+            srv.kill()
+            os.remove(ready)
+            with open(os.path.join(a.write, "tests", "golden_ref", name + ".json"), "wb") as fh:
+                fh.write(out)
+        return
     if a.set:
         lines, _meta = build(a.set, a.seed)
         print(json.dumps(rulebook(lines)))

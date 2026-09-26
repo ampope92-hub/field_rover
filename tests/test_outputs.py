@@ -1,8 +1,8 @@
 """Grades the survey reports. test.sh rebuilt the agent's OCaml three times and ran it against the
 shipped run, a held-back run and a short run reached by host name, keeping stdout under /opt/run.
-Nothing here recomputes a report: every value is compared with the golden that the rule book in
-solution/generate_run.py wrote. The coverage checks at the end read the runs themselves to show
-that each fact SPEC.md states is actually exercised by the data it is graded on."""
+Nothing here recomputes a report. The oracle is cross-checked by two independent implementations
+of SPEC.md: the rule book in solution/generate_run.py wrote golden/, the OCaml reference wrote
+golden_ref/, and they must agree. The coverage checks read the runs to show each case is there."""
 import json
 import os
 import re
@@ -47,9 +47,8 @@ def test_every_build_succeeded():
 
 @pytest.mark.parametrize("name", SETS)
 def test_report_shape(name):
-    """Each run printed one line holding a JSON object with exactly distance_mm, lost_frames and
-    trees; the figures are integers, trees is in ascending id order with one object per id, and
-    east_mm and north_mm are both integers or both null."""
+    """One line of JSON with exactly distance_mm, lost_frames and trees, integers, trees in
+    ascending id order, one per id, east_mm and north_mm both integers or both null."""
     rep = report(name)
     assert isinstance(rep, dict) and set(rep) == {"distance_mm", "lost_frames", "trees"}, sorted(rep)
     assert is_int(rep["distance_mm"]) and is_int(rep["lost_frames"])
@@ -62,6 +61,12 @@ def test_report_shape(name):
         assert both_null or (is_int(row["east_mm"]) and is_int(row["north_mm"])), row
         ids.append(row["id"])
     assert ids == sorted(set(ids)), "trees is not in ascending id order with one object per tree"
+
+
+def test_the_two_references_agree():
+    """The rule book's golden and the OCaml reference's report are equal on every graded run."""
+    for name in SETS:
+        assert golden(name) == json.loads(read_bytes(os.path.join(TRUTH, "golden_ref", name + ".json"))), name
 
 
 def _totals(name):
@@ -119,14 +124,11 @@ def test_edge_trees():
 @pytest.mark.parametrize("name", SETS)
 def test_each_run_read_the_whole_archive(name):
     """The run's archive logged batches covering every frame it holds, each asked for with
-    `start` or a cursor that archive had handed out (they are random), answered BUSY at least
-    once, and was asked for nothing after the batch that ended in done."""
+    `start` or a cursor it had handed out (they are random), and answered BUSY at least once."""
     log = read_bytes(os.path.join(RUN, f"archive_{name}.log")).decode("utf-8", "replace")
     total = int(re.search(r"serving (\d+) frames", log).group(1))
-    handed, served, busy = {"start"}, 0, 0
-    finals = late = 0
+    handed, served, busy, finals = {"start"}, 0, 0, 0
     for line in log.splitlines():
-        late += finals > 0 and re.search(r" (BATCH|BUSY|refused) ", line) is not None
         m = re.search(r" BATCH cursor=(\S+) frames=(\d+) next=(\S+)", line)
         if m:
             assert m.group(1) in handed, f"cursor {m.group(1)!r} was never handed out by this archive"
@@ -137,7 +139,6 @@ def test_each_run_read_the_whole_archive(name):
         busy += " BUSY " in line
     assert served >= total and finals >= 1, f"{served} of {total} frames were fetched"
     assert busy, "the run never met a BUSY answer"
-    assert not late, f"{late} requests came after the final batch"
 
 
 def test_a_graded_run_was_pointed_at_its_archive_by_name():
@@ -203,9 +204,11 @@ def cases(name):
         "late_stamps": late_stamps, "sys": len(sys_), "resets": resets, "first_after_reset": drv[resets[0]] if resets else None,
         "counter_wraps": counter_wraps, "tow_restarts": tow_restarts, "q": q,
         "retaken": sum(1 for v in tags.values() if v[0] == "blur" and "ok" in v),
-        "never_sharp": sum(1 for v in tags.values() if "ok" not in v), "tag_on_drive": tag_on_drive,
-        "mirrored": {x[1][3][5] for x in order if x[1][2] == "CFG"},
-        "standalone_bound": sum(1 for T in sharp if fix_q.get(T - T % 200) == 1 and fix_q.get(T - T % 200 + 200) == 4),
+        "never_sharp": sum(1 for v in tags.values() if v.count("blur") == 2 and "ok" not in v), "tag_on_drive": tag_on_drive,
+        "mirrored": {x[1][3][5] for x in order if x[1][2] == "CFG"}, "cfgs": len({tuple(x[1][3][1:]) for x in order if x[1][2] == "CFG"}),
+        "quiet_reset": all(abs((int(drv[i][k]) - int(drv[i - 1][k]) + 32768) % 65536 - 32768) < 100 for i in resets[:1] for k in (2, 3)),
+        "most_tags": max(len(v) for v in tags.values()),
+        "bounds": {(fix_q.get(T - T % 200), fix_q.get(T - T % 200 + 200), T % 200 == 0 and fix_q.get(T - 200)) for T in sharp},
     }
 
 
@@ -223,17 +226,15 @@ def golden_cases(name):
 def _common(c, g):
     assert c["sys"] == 1 and c["copies"] >= 20 and c["newest_first"] >= 50 and c["wraps_link"] >= 1
     assert len(c["resets"]) == 1 and (int(c["first_after_reset"][2]) != 0 or int(c["first_after_reset"][3]) != 0)
-    assert c["counter_wraps"] >= 3 and {4, 5} <= c["q"]
-    assert c["retaken"] >= 2 and c["never_sharp"] >= 1 and c["tag_on_drive"] >= 1
+    assert c["counter_wraps"] >= 3 and {4, 5} <= c["q"] and c["cfgs"] == 1
+    assert c["retaken"] >= 2 and c["never_sharp"] >= 1 and c["tag_on_drive"] >= 1 and c["most_tags"] == 2
+    assert (4, None, False) in c["bounds"] and any(5 in b[:2] for b in c["bounds"])
     assert g["negative_both"] >= 1 and g["null"] >= 2 and g["lost"] > 0
 
 
 def test_sample_carries_every_case():
-    """The shipped run carries each case SPEC.md's facts turn on: a backward clock step with
-    stamps made before it that read later than the step, copies sent twice and a store sent
-    newest first, the 16-bit frame number and both wheel counters wrapping, one brownout whose
-    first drive frames after the boot never arrived, the GPS week turning over, float and lost
-    fixes, retaken, never-sharp and drive-aligned tags, and negative grid positions."""
+    """The shipped run carries each case SPEC.md's facts turn on (see _common), a backward clock
+    step with stamps before it that read later than it, and the GPS week turning over."""
     c, g = cases("sample"), golden_cases("sample")
     _common(c, g)
     assert c["step"] < 0 and c["late_stamps"] >= 100 and c["tow_restarts"] == 1 and 0 in c["q"]
@@ -241,8 +242,7 @@ def test_sample_carries_every_case():
 
 
 def test_hidden_carries_every_case():
-    """The held-back run carries the same cases with other constants: the right motor mirrored,
-    another calibration, a larger backward step and the GPS week turning over."""
+    """The held-back run carries the same cases, the right motor mirrored and a larger step."""
     c, g = cases("hidden"), golden_cases("hidden")
     _common(c, g)
     assert c["step"] < 0 and c["late_stamps"] >= 100 and c["tow_restarts"] == 1 and 0 in c["q"]
@@ -251,9 +251,9 @@ def test_hidden_carries_every_case():
 
 def test_edge_carries_its_cases():
     """The short run steps the clock forward, stays inside one GPS week and still carries the
-    copies, the wraps, the brownout with its first frames lost and the tag cases, and one sharp
-    tag between a standalone fix (q 1) and a fixed one."""
+    copies, the wraps and the tag cases, a brownout only the fall in up marks, and sharp tags with
+    fixes q 1/q 4, q 4/q 1 and q 4/q 0 around them and one on a q 4 epoch after a q 1 fix."""
     c, g = cases("edge"), golden_cases("edge")
     _common(c, g)
     assert c["step"] > 0 and c["late_stamps"] == 0 and c["tow_restarts"] == 0
-    assert c["standalone_bound"] >= 1
+    assert c["quiet_reset"] and {(1, 4, False), (4, 1, False), (4, 0, False), (4, 4, 1)} <= c["bounds"]

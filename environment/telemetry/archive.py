@@ -19,7 +19,6 @@ import threading
 import time
 
 MAX_ASK = 1000
-IDLE_S = 30
 BUSY_MS = 250
 
 
@@ -72,15 +71,10 @@ class Handler(socketserver.StreamRequestHandler):
     def handle(self):
         a = self.server.archive
         peer = f"{self.client_address[0]}:{self.client_address[1]}"
-        self.request.settimeout(IDLE_S)
         a.note(f"open {peer}")
         try:
             while True:
-                try:
-                    raw = self.rfile.readline(4096)
-                except TimeoutError:
-                    a.note(f"{peer} idle for {IDLE_S} s, closed")
-                    break
+                raw = self.rfile.readline(4096)
                 if not raw:
                     break
                 if not raw.endswith(b"\n"):

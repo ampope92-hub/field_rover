@@ -18,7 +18,7 @@ can carry as many requests as you like, and more than one connection can be open
     FROM <cursor> <max>
     QUIT
 
-The first request of a run uses the cursor `start`. The archive answers either
+The cursor `start` is the beginning of the run. The archive answers either
 
     BATCH <k> <next>
 
@@ -28,13 +28,11 @@ followed by exactly k frame lines, or
 
 which means the base station was busy writing and that batch is not ready yet, so ask for it
 again; `ms` is how much longer the base station expects to be busy. `next` is the cursor for the
-rest of the run, or the word `done` on the final batch, which is not a cursor: once it has come,
-the tool asks the archive for nothing more. A cursor is an opaque string and the
-only thing to do with one is to send it back. `max` is a whole number from 1 to 1000. A batch
-carries at most `max` frames and at most the archive's own batch size, which is set per
-deployment. Anything the archive does not accept is answered with a line starting `ERR`. A
-connection that sends nothing for 30 seconds is closed by the archive, and `QUIT` closes it at
-once.
+rest of the run, or the word `done` on the final batch, which is not a cursor. A cursor is an
+opaque string and the only thing to do with one is to send it back. `max` is a whole number from
+1 to 1000. A batch carries at most `max` frames and at most the archive's own batch size, which
+is set per deployment. Anything the archive does not accept is answered with a line starting
+`ERR`, and `QUIT` closes the connection.
 
 A frame line is
 
@@ -86,7 +84,8 @@ counts every edge of both quadrature channels, which makes four counts per line.
 `gear` times for each turn of its wheel, and `circ_l_um` and `circ_r_um` are the rolling
 circumferences of the two wheels, measured on this rover, in micrometres. The motor on the side
 `mirrored` names is mounted the other way round, so that side's counter falls while its wheel
-rolls forward. A CFG frame goes out when the controller boots and every minute after that.
+rolls forward. A CFG frame, the same all run, goes out when the controller boots and every
+minute after that.
 
 Between two drive frames of one boot that the archive holds, neither wheel turns as much as half
 the counter's range.
@@ -114,7 +113,8 @@ receiver wrote them, with no stamp of its own.
 The row camera watches the trees on both sides of the alley. The first time the rover passes a
 tree it tags it: the TAG frame is stamped with the moment the camera took the picture and handed
 to the radio at that moment. A blurred picture is tagged `blur`, and the tree is tagged again the
-next time the rover passes it, from the next alley. Now and then that picture is blurred too.
+next time the rover passes it, from the next alley. Now and then that picture is blurred too, and
+the tree is not tagged a third time.
 
 ## The report
 
@@ -157,7 +157,7 @@ compiles, and compiles with
 
 The linker warns that name lookups in a static program need the C library's shared files at run
 time; they are on the grading box. The result is started from `/app/rover` with the two
-environment variables set, and every figure in the report has to be its own work: while it runs,
-nothing else on the box can be started. The compiler is allowed 300 seconds, and a run of the tool 120.
-`/app/rover/build.sh` does the same compile and `/app/rover/run.sh` builds and runs the tool
-against the archive here. The grader uses neither of them.
+environment variables set, and while it runs nothing else on the box can be started. The
+compiler is allowed 300 seconds, and a run of the tool 120. `/app/rover/build.sh` does the same
+compile and `/app/rover/run.sh` builds and runs the tool against the archive here. The grader
+uses neither of them.
