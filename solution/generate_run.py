@@ -166,6 +166,7 @@ def build(name, seed=None):
             out.append((a, a + int(secs * 1000) + rng.randint(0, 900)))
         return out
     outages = spans(cfg["outages"])
+    assert all(b - a < 60_000 for a, b in outages)       # SPEC.md: no dropout lasted a minute
     floats = spans(cfg["float"])
     nofix = spans(cfg["nofix"])
     # the clock step: just before an outage (inside its re-send window) or at a fixed point

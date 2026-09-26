@@ -23,6 +23,7 @@ def read_bytes(path):
 
 
 def report(name):
+    assert read_bytes(os.path.join(RUN, f"report_{name}.status")) != b"killed\n", f"the {name} run was killed at 120 s"
     text = read_bytes(os.path.join(RUN, f"report_{name}.json")).decode("utf-8")
     line = text.removesuffix("\n")
     assert line and "\n" not in line, f"the {name} report is not exactly one line"
@@ -142,8 +143,7 @@ def test_each_run_read_the_whole_archive(name):
 
 
 def test_a_graded_run_was_pointed_at_its_archive_by_name():
-    """TELEMETRY_HOST carries a host name as readily as an address; the short run was given a
-    name, its archive listened on the address the name resolves to, and it served that run."""
+    """The short run was given a host name, and its archive, on the address it resolves to, served."""
     host = read_bytes(os.path.join(RUN, "named_host.txt")).decode().strip()
     assert host and not re.match(r"^\d+\.\d+\.\d+\.\d+$", host), f"the named run was given {host!r}"
     log = read_bytes(os.path.join(RUN, "archive_edge.log")).decode("utf-8", "replace")

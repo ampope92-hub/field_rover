@@ -193,7 +193,7 @@ stop_archive() {
 # names, as a user of its own, with every other program closed to it, for at most the 120 seconds
 # SPEC.md states.
 exec_tool() {
-  local host="$1" port="$2" out="$3" pid uid=$(( 20000 + RANDOM ))
+  local host="$1" port="$2" out="$3" pid rc t0=$SECONDS uid=$(( 20000 + RANDOM ))
   /usr/bin/chown "$uid:$uid" /app/rover/bin/survey
   close_exec
   setsid /usr/bin/timeout --signal=KILL 120 bash -c '
@@ -204,8 +204,10 @@ exec_tool() {
       exec setpriv --clear-groups --no-new-privs --reuid "$3" --regid "$3" /app/rover/bin/survey' \
       _ "$host" "$port" "$uid" > "$out" &
   pid=$!
-  wait "$pid"
-  echo "run exit status: $? (archive $host:$port)"
+  wait "$pid"; rc=$?
+  echo "run exit status: $rc (archive $host:$port)"
+  # killed only when the run hit the 120 s limit; a 124/137 before it is the tool's own exit
+  if { [ "$rc" -eq 124 ] || [ "$rc" -eq 137 ]; } && [ $(( SECONDS - t0 )) -ge 120 ]; then echo killed; else echo "exit $rc"; fi > "${out%.json}.status"
   open_exec
   kill -TERM -- -"$pid" 2>/dev/null || true
   kill -KILL -- -"$pid" 2>/dev/null || true

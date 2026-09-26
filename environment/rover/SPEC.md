@@ -11,8 +11,7 @@ The base station keeps every frame it heard from the rover over the radio, toget
 moment it heard it, and serves them over TCP. `TELEMETRY_HOST` holds the host name or the address
 of the archive and `TELEMETRY_PORT` its port.
 
-A request is one line ending in a newline, and so is the first line of every answer. A connection
-can carry as many requests as you like, and more than one connection can be open at once.
+A request is one line ending in a newline, and so is the first line of every answer.
 
     FROM <cursor> <max>
     QUIT
@@ -23,15 +22,15 @@ The cursor `start` is the beginning of the run. The archive answers either
 
 followed by exactly k frame lines, or
 
-    BUSY <ms>
+    BUSY
 
 which means the base station was busy writing and that batch is not ready yet, so ask for it
-again; `ms` is how much longer the base station expects to be busy. `next` is the cursor for the
-rest of the run, or the word `done` on the final batch, which is not a cursor. A cursor is an
-opaque string and the only thing to do with one is to send it back. `max` is a whole number from
-1 to 1000. A batch carries at most `max` frames and at most the archive's own batch size, which
-is set per deployment. Anything the archive does not accept is answered with a line starting
-`ERR`; the tool sends nothing the archive does not accept. `QUIT` closes the connection.
+again. `next` is the cursor for the rest of the run, or the word `done` on the final batch,
+which is not a cursor. A cursor is an opaque string and the only thing to do with one is to send
+it back. `max` is a whole number from 1 to 1000. A batch carries at most `max` frames and at
+most the archive's own batch size, which is set per deployment. Anything the archive does not
+accept is answered with a line starting `ERR`; the tool sends nothing the archive does not
+accept. `QUIT` closes the connection.
 
 A frame line is
 
@@ -63,8 +62,8 @@ While the link is up the radio sends each frame as it is handed over. A frame lo
 that point is never sent again. The radio holds on to its 2,048 most recent frames, and when the
 link has dropped and comes back it sends again every frame still held that was handed over
 during the drop or in the two seconds before it, newest first, while new frames keep going out
-as they are made. Frames that got through just before a drop therefore reach the base station
-twice. A frame is the same frame when its text after the arrival time is the same.
+as they are made. No dropout on this run lasted a minute. A frame is the same frame when its
+text after the arrival time is the same.
 
 ### The computer's clock
 

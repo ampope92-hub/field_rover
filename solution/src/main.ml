@@ -42,8 +42,8 @@ let fetch_all () =
     flush oc;
     let head = String.trim (input_line ic) in
     match String.split_on_char ' ' head with
-    | [ "BUSY"; ms ] ->
-      Unix.sleepf (float_of_int (int_of_string ms) /. 1000.);
+    | [ "BUSY" ] ->
+      Unix.sleepf 0.1;
       ask cursor
     | [ "BATCH"; k; next ] ->
       for _ = 1 to int_of_string k do acc := input_line ic :: !acc done;

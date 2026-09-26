@@ -41,14 +41,14 @@ class Archive:
             self.log.flush()
 
     def serve(self, cursor, want):
-        """Returns ('BUSY', ms) or ('BATCH', lines, next)."""
+        """Returns ('BUSY',) or ('BATCH', lines, next)."""
         with self.lock:
             pos = self.cursors[cursor]
             now = time.monotonic()
             until = self.hold.get(cursor)
             if until is not None:
                 if now < until:
-                    return ("BUSY", max(1, int((until - now) * 1000) + 1))
+                    return ("BUSY",)
                 del self.hold[cursor]
             else:
                 self.asked += 1
@@ -56,7 +56,7 @@ class Archive:
                 if (self.asked in self.busy_n or any(self.asked % e == 0 for e in self.busy_every)
                         or (final and self.busy_last)):
                     self.hold[cursor] = now + BUSY_MS / 1000
-                    return ("BUSY", BUSY_MS)
+                    return ("BUSY",)
             chunk = self.lines[pos:pos + min(want, self.batch)]
             end = pos + len(chunk)
             if end >= len(self.lines):
@@ -102,8 +102,8 @@ class Handler(socketserver.StreamRequestHandler):
                     continue
                 res = a.serve(cur, int(want))
                 if res[0] == "BUSY":
-                    a.note(f"{peer} BUSY cursor={cur} {res[1]} ms")
-                    self.wfile.write(f"BUSY {res[1]}\n".encode())
+                    a.note(f"{peer} BUSY cursor={cur}")
+                    self.wfile.write(b"BUSY\n")
                     continue
                 _, chunk, nxt = res
                 a.note(f"{peer} BATCH cursor={cur} frames={len(chunk)} next={nxt}")
