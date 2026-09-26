@@ -147,15 +147,14 @@ A tree with no sharp tag is left out.
 ## Building and running
 
 The tool is OCaml, compiled with the OCaml 4.13.1 on the box (`ocamlopt`) against the standard
-library and the `unix` library that comes with it, and nothing else. The whole tool is
-`/app/rover/src/main.ml`. The grader deletes every other file under `/app/rover/src` before it
+library and the `unix` library that comes with it, and nothing else. The grader builds it from
+`/app/rover/src/main.ml` alone: it deletes every other file under `/app/rover/src` before it
 compiles, and compiles with
 
     ocamlopt -ccopt -static unix.cmxa /app/rover/src/main.ml -o <a path of its own>
 
 The linker warns that name lookups in a static program need the C library's shared files at run
 time; they are on the grading box. The result is started from `/app/rover` with the two
-environment variables set, and while it runs nothing else on the box can be started. The
-compiler is allowed 300 seconds, and a run of the tool 120. `/app/rover/build.sh` does the same
-compile and `/app/rover/run.sh` builds and runs the tool against the archive here. The grader
-uses neither of them.
+environment variables set. The compiler is allowed 300 seconds, and a run of the tool 120.
+`/app/rover/build.sh` does the same compile and `/app/rover/run.sh` builds and runs the tool
+against the archive here. The grader uses neither of them.
