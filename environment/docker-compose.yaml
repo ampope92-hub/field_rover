@@ -24,7 +24,3 @@ services:
       - "7700"
       - "--batch"
       - "500"
-      # which requests this base station answers BUSY: the second one it sees, every
-      # twenty-fifth after that, and every fresh request for the last batch
-      - "--busy"
-      - "2,e25,last"

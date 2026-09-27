@@ -2,13 +2,11 @@
 """The base station's telemetry archive for one rover run. Serves the frames the base station
 received, in the order they arrived, each with its arrival time, over a line protocol on TCP.
 
-    archive.py --data DIR --host H --port P [--batch N] [--busy LIST] [--ready-file F] [--log F]
+    archive.py --data DIR --host H --port P [--batch N] [--ready-file F] [--log F]
 
 DIR holds run.txt: one received frame per line, `<rx_ms> <frame>`, in arrival order.
 --batch   the most frames one batch carries (at most 1000)
---busy    FROM requests answered BUSY first, comma separated: an ordinal counted over every
-          connection (1 is the first FROM this archive sees), eN for every Nth one, and the
-          word `last` for every fresh request of the final batch
+Every request that is not `FROM <cursor> <max>` with a known cursor and max 1 to 1000 is refused.
 """
 import argparse
 import contextlib
@@ -19,21 +17,15 @@ import threading
 import time
 
 MAX_ASK = 1000
-BUSY_MS = 250
 
 
 class Archive:
-    def __init__(self, lines, batch, busy, log):
+    def __init__(self, lines, batch, log):
         self.lines = lines
         self.batch = batch
-        self.busy_n = {int(b) for b in busy if b.isdigit()}
-        self.busy_every = [int(b[1:]) for b in busy if b.startswith("e") and b[1:].isdigit()]
-        self.busy_last = "last" in busy
         self.log = log
         self.lock = threading.Lock()
         self.cursors = {"start": 0}
-        self.asked = 0
-        self.hold = {}            # cursor -> monotonic time before which it is answered BUSY
 
     def note(self, msg):
         with self.lock:
@@ -41,22 +33,9 @@ class Archive:
             self.log.flush()
 
     def serve(self, cursor, want):
-        """Returns ('BUSY',) or ('BATCH', lines, next)."""
+        """Returns (lines, next)."""
         with self.lock:
             pos = self.cursors[cursor]
-            now = time.monotonic()
-            until = self.hold.get(cursor)
-            if until is not None:
-                if now < until:
-                    return ("BUSY",)
-                del self.hold[cursor]
-            else:
-                self.asked += 1
-                final = pos + min(want, self.batch) >= len(self.lines)
-                if (self.asked in self.busy_n or any(self.asked % e == 0 for e in self.busy_every)
-                        or (final and self.busy_last)):
-                    self.hold[cursor] = now + BUSY_MS / 1000
-                    return ("BUSY",)
             chunk = self.lines[pos:pos + min(want, self.batch)]
             end = pos + len(chunk)
             if end >= len(self.lines):
@@ -64,7 +43,7 @@ class Archive:
             else:
                 nxt = secrets.token_hex(5)
                 self.cursors[nxt] = end
-            return ("BATCH", chunk, nxt)
+            return chunk, nxt
 
 
 class Handler(socketserver.StreamRequestHandler):
@@ -82,13 +61,8 @@ class Handler(socketserver.StreamRequestHandler):
                     self.wfile.write(b"ERR a request ends in a newline\n")
                     break
                 parts = raw.decode("ascii", "replace").split()
-                if not parts:
-                    continue
-                if parts[0] == "QUIT" and len(parts) == 1:
-                    a.note(f"{peer} QUIT")
-                    break
-                if parts[0] != "FROM" or len(parts) != 3:
-                    a.note(f"{peer} refused {parts[0][:20]}")
+                if len(parts) != 3 or parts[0] != "FROM":
+                    a.note(f"{peer} refused {' '.join(parts)[:20]!r}")
                     self.wfile.write(b"ERR unknown command\n")
                     continue
                 cur, want = parts[1], parts[2]
@@ -100,12 +74,7 @@ class Handler(socketserver.StreamRequestHandler):
                     a.note(f"{peer} refused cursor={cur[:40]}")
                     self.wfile.write(b"ERR no such cursor\n")
                     continue
-                res = a.serve(cur, int(want))
-                if res[0] == "BUSY":
-                    a.note(f"{peer} BUSY cursor={cur}")
-                    self.wfile.write(b"BUSY\n")
-                    continue
-                _, chunk, nxt = res
+                chunk, nxt = a.serve(cur, int(want))
                 a.note(f"{peer} BATCH cursor={cur} frames={len(chunk)} next={nxt}")
                 out = [f"BATCH {len(chunk)} {nxt}\n"] + [ln + "\n" for ln in chunk]
                 self.wfile.write("".join(out).encode())
@@ -125,7 +94,6 @@ def main():
     ap.add_argument("--host", default="127.0.0.1")
     ap.add_argument("--port", type=int, default=7700)
     ap.add_argument("--batch", type=int, default=500)
-    ap.add_argument("--busy", default="")
     ap.add_argument("--ready-file")
     ap.add_argument("--log")
     args = ap.parse_args()
@@ -136,11 +104,11 @@ def main():
 
 
 def serve(args, lines, log):
-    archive = Archive(lines, min(args.batch, MAX_ASK), [b for b in args.busy.split(",") if b], log)
+    archive = Archive(lines, min(args.batch, MAX_ASK), log)
     srv = Server((args.host, args.port), Handler)
     srv.archive = archive
     archive.note(f"serving {len(lines)} frames from {args.data} on {args.host}:{args.port}, "
-                 f"batches of up to {archive.batch}, busy on {args.busy or 'nothing'}")
+                 f"batches of up to {archive.batch}")
     if args.ready_file:
         with open(args.ready_file, "w") as fh:
             fh.write("ready\n")

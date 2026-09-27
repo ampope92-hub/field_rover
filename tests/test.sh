@@ -166,10 +166,10 @@ build_tool() {
 }
 
 SERVICE_PID=""
-start_archive() {   # $1 run, $2 host, $3 port, $4 batch size, $5 busy schedule
+start_archive() {   # $1 run, $2 host, $3 port, $4 batch size
   /usr/bin/rm -f /opt/run/ready
   /usr/local/bin/python3 -P /opt/archive/archive.py --data "/opt/truth/$1" \
-      --host "$2" --port "$3" --batch "$4" --busy "$5" \
+      --host "$2" --port "$3" --batch "$4" \
       --ready-file /opt/run/ready --log "/opt/run/archive_$1.log" >> "/opt/run/archive_$1.err" 2>&1 &
   SERVICE_PID=$!
   local i
@@ -216,21 +216,21 @@ exec_tool() {
   /usr/bin/chmod 600 "$out" 2>/dev/null || true
 }
 
-echo "=== the run the agent's archive serves, on another address, port, batch size and BUSY schedule ==="
+echo "=== the run the agent's archive serves, on another address, port and batch size ==="
 build_tool
-start_archive sample 127.0.0.2 7711 317 1,6,last || { echo 0 > /logs/verifier/reward.txt; exit 0; }
+start_archive sample 127.0.0.2 7711 317 || { echo 0 > /logs/verifier/reward.txt; exit 0; }
 exec_tool 127.0.0.2 7711 /opt/run/report_sample.json
 stop_archive
 
 echo "=== a longer run the agent has never seen ==="
 build_tool
-start_archive hidden 127.0.0.1 7712 733 3,e40,last || { echo 0 > /logs/verifier/reward.txt; exit 0; }
+start_archive hidden 127.0.0.1 7712 733 || { echo 0 > /logs/verifier/reward.txt; exit 0; }
 exec_tool 127.0.0.1 7712 /opt/run/report_hidden.json
 stop_archive
 
 echo "=== a short run, reached by host name ==="
 build_tool
-start_archive edge 127.0.0.4 7713 64 1,e17,last || { echo 0 > /logs/verifier/reward.txt; exit 0; }
+start_archive edge 127.0.0.4 7713 64 || { echo 0 > /logs/verifier/reward.txt; exit 0; }
 exec_tool "$ARCHIVE_NAME" 7713 /opt/run/report_edge.json
 stop_archive
 printf '%s\n' "$ARCHIVE_NAME" > /opt/run/named_host.txt
@@ -238,7 +238,7 @@ printf '%s\n' "$ARCHIVE_NAME" > /opt/run/named_host.txt
 as_runner bash -c 'kill -9 -1' 2>/dev/null || true
 echo "=== what each archive recorded ==="
 for s in sample hidden edge; do
-  echo "$s: $(/usr/bin/grep -c ' BATCH ' /opt/run/archive_$s.log) batches, $(/usr/bin/grep -c ' BUSY ' /opt/run/archive_$s.log) BUSY answers, $(/usr/bin/grep -c ' refused' /opt/run/archive_$s.log) refused"
+  echo "$s: $(/usr/bin/grep -c ' BATCH ' /opt/run/archive_$s.log) batches, $(/usr/bin/grep -c ' refused' /opt/run/archive_$s.log) refused"
 done
 /usr/bin/head -4 /opt/run/archive_sample.log
 

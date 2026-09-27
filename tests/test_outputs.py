@@ -87,8 +87,8 @@ def _trees(name):
 
 
 def test_sample_distance_and_lost():
-    """On the shipped run, served on an address, port, batch size and BUSY schedule the agent's
-    environment never used, distance_mm and lost_frames equal the rule book's."""
+    """On the shipped run, served on an address, port and batch size the agent's environment
+    never used, distance_mm and lost_frames equal the rule book's."""
     _totals("sample")
 
 
@@ -124,10 +124,10 @@ def test_edge_trees():
 @pytest.mark.parametrize("name", SETS)
 def test_each_run_read_the_whole_archive(name):
     """The run's archive logged batches covering every frame it holds, each asked for with `start`
-    or a cursor it had handed out (they are random), met a BUSY, and refused no request."""
+    or a cursor it had handed out (they are random), and refused no request."""
     log = read_bytes(os.path.join(RUN, f"archive_{name}.log")).decode("utf-8", "replace")
     total = int(re.search(r"serving (\d+) frames", log).group(1))
-    handed, served, busy, finals = {"start"}, 0, 0, 0
+    handed, served, finals = {"start"}, 0, 0
     for line in log.splitlines():
         m = re.search(r" BATCH cursor=(\S+) frames=(\d+) next=(\S+)", line)
         if m:
@@ -135,10 +135,7 @@ def test_each_run_read_the_whole_archive(name):
             handed.add(m.group(3))
             served += int(m.group(2))
             finals += m.group(3) == "done"
-            continue
-        busy += " BUSY " in line
     assert served >= total and finals >= 1, f"{served} of {total} frames were fetched"
-    assert busy, "the run never met a BUSY answer"
     assert " refused " not in log, f"the archive refused {log.count(' refused ')} requests"
 
 

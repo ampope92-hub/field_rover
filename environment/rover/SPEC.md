@@ -15,21 +15,16 @@ A request is one line ending in a newline, and so is the first line of every ans
 
     FROM <cursor> <max>
 
-The cursor `start` is the beginning of the run. The archive answers either
+The cursor `start` is the beginning of the run. The archive answers
 
     BATCH <k> <next>
 
-followed by exactly k frame lines, or
-
-    BUSY
-
-which means the base station was busy writing and that batch is not ready yet, so ask for it
-again. `next` is the cursor for the rest of the run, or the word `done` on the final batch,
-which is not a cursor. A cursor is an opaque string and the only thing to do with one is to send
-it back. `max` is a whole number from 1 to 1000. A batch carries at most `max` frames and at
-most the archive's own batch size, which is set per deployment. Anything the archive does not
-accept is answered with a line starting `ERR`; the tool sends nothing the archive does not
-accept.
+followed by exactly k frame lines. `next` is the cursor for the rest of the run, or the word
+`done` on the final batch, which is not a cursor. A cursor is an opaque string and the only
+thing to do with one is to send it back. `max` is a whole number from 1 to 1000. A batch carries
+at most `max` frames and at most the archive's own batch size, which is set per deployment.
+Anything the archive does not accept is answered with a line starting `ERR`; the tool sends
+nothing the archive does not accept.
 
 A frame line is
 
