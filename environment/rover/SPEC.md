@@ -1,9 +1,6 @@
 # SR-4 run archive and the tree survey
 
-Field notes for the survey tool, kept by the rover team. The first part is how to get a run off
-the base station, the second is what each kind of frame carries, the third is what we know about
-the rover's parts on this run, and the last is the report the orchard team wants and how the tool
-gets built.
+Field notes for the survey tool, kept by the rover team.
 
 ## Getting the run
 
@@ -20,8 +17,8 @@ The cursor `start` is the beginning of the run. The archive answers
     BATCH <k> <next>
 
 followed by exactly k frame lines. `next` is the cursor for the rest of the run, or the word
-`done` on the final batch, which is not a cursor. A cursor is an opaque string and the only
-thing to do with one is to send it back. `max` is a whole number from 1 to 1000. A batch carries
+`done` on the final batch, which is not a cursor. A cursor is ten lowercase hexadecimal digits
+that the archive draws at random. `max` is a whole number from 1 to 1000. A batch carries
 at most `max` frames and at most the archive's own batch size, which is set per deployment.
 Anything the archive does not accept is answered with a line starting `ERR`; the tool sends
 nothing the archive does not accept.
@@ -56,8 +53,9 @@ While the link is up the radio sends each frame as it is handed over. A frame lo
 that point is never sent again. The radio holds on to its 2,048 most recent frames, and when the
 link has dropped and comes back it sends again every frame still held that was handed over
 during the drop or in the two seconds before it, newest first, while new frames keep going out
-as they are made. No dropout on this run lasted a minute. A frame is the same frame when its
-text after the arrival time is the same.
+as they are made. The base station never went a minute without hearing the rover, and the radio
+never numbered 10,000 frames in a minute. A frame is the same frame when its text after the
+arrival time is the same.
 
 ### The computer's clock
 
@@ -79,8 +77,9 @@ circumferences of the two wheels, measured on this rover, in micrometres. The mo
 rolls forward. A CFG frame, the same all run, goes out when the controller boots and every
 minute after that.
 
-Between two drive frames of one boot that the archive holds, neither wheel turns as much as half
-the counter's range.
+Between two drive frames of one boot that the archive holds, and from the brownout to the first
+drive frame the archive holds after it, neither wheel turns as much as a third of the counter's
+range.
 
 The controller had been up for hours when the run started. It browned out once during the run.
 The drive stops while it is down, and when it comes back its `up` and both counters start again
@@ -134,7 +133,8 @@ to the last one, both included, the archive does not hold.
 - `east_mm` and `north_mm`, the antenna's position at that time, interpolated in time along the
   straight line from the fix of the epoch at or before that time to the fix of the next epoch and
   rounded down (toward minus infinity) to a whole millimetre, when the archive holds both of
-  those fixes and both are fixed (q 4); otherwise both are `null`
+  those fixes and both are fixed (q 4); otherwise both are `null`. On this run a sharp tag that
+  falls exactly on an epoch always has both fixes held and fixed
 
 A tree with no sharp tag is left out.
 

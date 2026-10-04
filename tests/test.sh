@@ -85,10 +85,10 @@ scratch_roots() {
   done < /proc/mounts
 }
 
-# While the tool runs, nothing else can be started: every regular file with a group or other
-# execute bit, on every real mount, loses those bits, and the tool runs as a user id drawn for that
-# run alone with a limit of one process, so a fork or a spawn fails. The tool is a static binary
-# that user owns, so it keeps its own bit and needs no loader. The modes are saved and restored
+# While the tool runs, every regular file with a group or other execute bit, on every real mount,
+# loses those bits, and the tool runs as a user id drawn for that run alone; whatever that user id
+# still has running afterwards is killed. The tool is a static binary that user owns, so it keeps
+# its own bit and needs no loader. The modes are saved and restored
 # after the run, and by the EXIT trap if the script dies in between.
 EXEC_SAVED=""
 close_exec() {
@@ -201,7 +201,6 @@ exec_tool() {
       cd /app/rover
       export HOME=/home/runner
       export TELEMETRY_HOST="$1" TELEMETRY_PORT="$2"
-      ulimit -u 1
       exec setpriv --clear-groups --no-new-privs --reuid "$3" --regid "$3" /app/rover/bin/survey' \
       _ "$host" "$port" "$uid" > "$out" &
   pid=$!
@@ -212,7 +211,7 @@ exec_tool() {
   open_exec
   kill -TERM -- -"$pid" 2>/dev/null || true
   kill -KILL -- -"$pid" 2>/dev/null || true
-  as_runner bash -c 'kill -9 -1' 2>/dev/null || true
+  setpriv --clear-groups --reuid "$uid" --regid "$uid" bash -c 'kill -9 -1' 2>/dev/null || true
   /usr/bin/chown root:root "$out" 2>/dev/null || true
   /usr/bin/chmod 600 "$out" 2>/dev/null || true
 }

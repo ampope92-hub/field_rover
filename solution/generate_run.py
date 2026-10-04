@@ -166,7 +166,6 @@ def build(name, seed=None):
             out.append((a, a + int(secs * 1000) + rng.randint(0, 900)))
         return out
     outages = spans(cfg["outages"])
-    assert all(b - a < 60_000 for a, b in outages)       # SPEC.md: no dropout lasted a minute
     floats = spans(cfg["float"])
     nofix = spans(cfg["nofix"])
     # the clock step: just before an outage (inside its re-send window) or at a fixed point
@@ -407,15 +406,20 @@ def build(name, seed=None):
             held.add(i)
             order += 1
     arrivals.sort()
-    # the stated premise: between two held drive frames of one boot neither wheel turns half
-    # the counter's range
+    # SPEC.md: the base station never went a minute without hearing the rover, and the radio
+    # never numbered 10,000 frames in a minute
+    assert all(arrivals[k + 1][0] - arrivals[k][0] < 60_000 for k in range(len(arrivals) - 1)), (name, seed)
+    assert all(link[i + 9999][1] - link[i][1] >= 60_000 for i in range(len(link) - 9999)), (name, seed)
+    # SPEC.md: between two held drive frames of one boot, and from the brownout to the first held
+    # drive frame after it, neither wheel turns as much as a third of the counter's range
     prev = None
     for i in sorted(held):
         if link[i][2] != "DRV":
             continue
         b, nl, nr = raw_counts[link[i][1]]
-        if prev and prev[0] == b:
-            assert abs(nl - prev[1]) < 32768 and abs(nr - prev[2]) < 32768, (name, seed, i)
+        if prev:
+            pl, pr = prev[1:] if prev[0] == b else (0, 0)
+            assert 3 * max(abs(nl - pl), abs(nr - pr)) < 65536, (name, seed, i)
         prev = (b, nl, nr)
     lines = [f"{start + rx} {text}" for rx, _, text in arrivals]
     meta = {"seed": seed, "step_at": step_at, "boot2": boot2, "outages": outages, "floats": floats,

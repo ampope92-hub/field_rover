@@ -14,7 +14,8 @@ let epoch_ms = 200
 (* floor division for a positive divisor; OCaml's own / truncates toward zero *)
 let fdiv a b = if a >= 0 then a / b else - ((- a + b - 1) / b)
 
-(* a 16-bit counter difference read the short way round *)
+(* a 16-bit counter difference read the short way round: SPEC.md keeps every drive step, the
+   first one after the brownout included, under a third of the counter's range *)
 let s16 d = let d = d land 0xFFFF in if d >= 0x8000 then d - 0x10000 else d
 
 (* ---- the archive ------------------------------------------------------------------------ *)
@@ -78,7 +79,9 @@ let () =
       let fr = parse ln in
       if Hashtbl.mem seen fr.text then None
       else (Hashtbl.add seen fr.text (); Some fr)) lines in
-  (* unwrap the frame number along arrival order, each to the value nearest the one before *)
+  (* unwrap the frame number along arrival order, each to the value nearest the one before: two
+     frames heard one after the other were made under two minutes apart, so fewer than 20,000
+     numbers apart (SPEC.md: a minute without hearing the rover never passed, 10,000 a minute) *)
   let last = ref None in
   List.iter (fun fr ->
       let u = match !last with
