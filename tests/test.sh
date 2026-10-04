@@ -143,6 +143,7 @@ build_tool() {
   echo "left under src for the compile: $(/usr/bin/find /app/rover/src -mindepth 1 | /usr/bin/tr '\n' ' ')"
   /usr/bin/install -d -o runner -g runner -m 755 /app/rover/bin
   /usr/bin/chown -R runner:runner /app/rover
+  /usr/bin/chmod 755 /app/rover   # the pristine copy is 0700; the run's own uid must be able to reach bin/survey
   /usr/bin/touch /app/rover/src/main.ml 2>/dev/null || true
 
   close_interp
