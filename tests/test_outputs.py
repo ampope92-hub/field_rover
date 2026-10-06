@@ -23,7 +23,8 @@ def read_bytes(path):
 
 
 def report(name):
-    assert read_bytes(os.path.join(RUN, f"report_{name}.status")) != b"killed\n", f"the {name} run was killed at 120 s"
+    status = read_bytes(os.path.join(RUN, f"report_{name}.status")).decode().strip()
+    assert status == "exit 0", f"the {name} run ended with {status}, not exit 0 (killed means it hit 120 s)"
     text = read_bytes(os.path.join(RUN, f"report_{name}.json")).decode("utf-8")
     line = text.removesuffix("\n")
     assert line and "\n" not in line, f"the {name} report is not exactly one line"
@@ -123,19 +124,18 @@ def test_edge_trees():
 
 @pytest.mark.parametrize("name", SETS)
 def test_each_run_read_the_whole_archive(name):
-    """The run's archive logged batches covering every frame it holds, each asked for with `start`
-    or a cursor it had handed out (they are random), and refused no request."""
+    """The run's archive logged one chain of batches covering every frame it holds: the first asked
+    for with `start`, each later one with the next cursor of the batch before, nothing after done,
+    and no request refused."""
     log = read_bytes(os.path.join(RUN, f"archive_{name}.log")).decode("utf-8", "replace")
     total = int(re.search(r"serving (\d+) frames", log).group(1))
-    handed, served, finals = {"start"}, 0, 0
+    want, served = "start", 0
     for line in log.splitlines():
         m = re.search(r" BATCH cursor=(\S+) frames=(\d+) next=(\S+)", line)
         if m:
-            assert m.group(1) in handed, f"cursor {m.group(1)!r} was never handed out by this archive"
-            handed.add(m.group(3))
-            served += int(m.group(2))
-            finals += m.group(3) == "done"
-    assert served >= total and finals >= 1, f"{served} of {total} frames were fetched"
+            assert m.group(1) == want, f"a batch was asked for with {m.group(1)!r} where the one before handed out {want!r}"
+            want, served = m.group(3), served + int(m.group(2))
+    assert want == "done" and served == total, f"{served} of {total} frames were fetched, last next {want!r}"
     assert " refused " not in log, f"the archive refused {log.count(' refused ')} requests"
 
 

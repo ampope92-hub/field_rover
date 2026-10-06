@@ -16,8 +16,8 @@ The cursor `start` is the beginning of the run. The archive answers
 
     BATCH <k> <next>
 
-followed by exactly k frame lines. `next` is the cursor for the rest of the run, or the word
-`done` on the final batch, which is not a cursor. A cursor is ten lowercase hexadecimal digits
+followed by exactly k frame lines. `next` is the cursor the tool's next request carries, or the
+word `done` on the final batch, after which the tool asks nothing more. A cursor is ten lowercase hexadecimal digits
 that the archive draws at random. `max` is a whole number from 1 to 1000. A batch carries
 at most `max` frames and at most the archive's own batch size, which is set per deployment.
 Anything the archive does not accept is answered with a line starting `ERR`; the tool sends
@@ -149,6 +149,6 @@ compiles, and compiles with
 
 The linker warns that name lookups in a static program need the C library's shared files at run
 time; they are on the grading box. The result is started from `/app/rover` with the two
-environment variables set. The compiler is allowed 300 seconds, and a run of the tool 120.
-`/app/rover/build.sh` does the same compile and `/app/rover/run.sh` builds and runs the tool
-against the archive here. The grader uses neither of them.
+environment variables set. The compiler is allowed 300 seconds, and a run of the tool 120, which
+ends with exit status 0. `/app/rover/build.sh` does the same compile and `/app/rover/run.sh`
+builds and runs the tool against the archive here.
